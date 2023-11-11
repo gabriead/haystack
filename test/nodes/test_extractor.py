@@ -14,20 +14,28 @@ def tiny_reader():
     return FARMReader(model_name_or_path="deepset/tinyroberta-squad2", num_processes=0)
 
 
+MODEL_NAME = "dslim/bert-base-NER"
+
 @pytest.fixture
 def ner_node():
-    return EntityExtractor(model_name_or_path="elastic/distilbert-base-cased-finetuned-conll03-english")
+    return EntityExtractor(model_name_or_path=MODEL_NAME)
+    #return EntityExtractor(model_name_or_path="elastic/distilbert-base-cased-finetuned-conll03-english")
+
+
+@pytest.fixture
+def test_entity_recognition(document_store_with_docs, ner_node):
+    ner_node.run()
 
 
 @pytest.mark.integration
 @pytest.mark.parametrize("document_store_with_docs", ["memory"], indirect=True)
-def test_extractor(document_store_with_docs, tiny_reader, ner_node):
+def test_extractor(document_store_with_docs, ner_node):
     es_retriever = BM25Retriever(document_store=document_store_with_docs)
 
     pipeline = Pipeline()
     pipeline.add_node(component=es_retriever, name="ESRetriever", inputs=["Query"])
     pipeline.add_node(component=ner_node, name="NER", inputs=["ESRetriever"])
-    pipeline.add_node(component=tiny_reader, name="Reader", inputs=["NER"])
+    #pipeline.add_node(component=tiny_reader, name="Reader", inputs=["NER"])
 
     prediction = pipeline.run(
         query="Who lives in Berlin?", params={"ESRetriever": {"top_k": 1}, "Reader": {"top_k": 1}}
@@ -101,7 +109,7 @@ def test_extractor_indexing(document_store, samples_path):
 
     text_converter = TextConverter()
     ner = EntityExtractor(
-        model_name_or_path="elastic/distilbert-base-cased-finetuned-conll03-english", flatten_entities_in_meta_data=True
+        model_name_or_path=MODEL_NAME, flatten_entities_in_meta_data=True
     )
 
     pipeline = Pipeline()
@@ -159,7 +167,7 @@ def test_extract_method():
 @pytest.mark.integration
 def test_extract_method_pre_split_text():
     ner = EntityExtractor(
-        model_name_or_path="elastic/distilbert-base-cased-finetuned-conll03-english", max_seq_len=6, pre_split_text=True
+        model_name_or_path=MODEL_NAME, max_seq_len=6, pre_split_text=True
     )
 
     text = "Hello my name is Arya. I live in Winterfell and my brother is Jon Snow."
@@ -189,7 +197,7 @@ def test_extract_method_pre_split_text():
 @pytest.mark.integration
 def test_extract_method_unknown_token():
     ner = EntityExtractor(
-        model_name_or_path="elastic/distilbert-base-cased-finetuned-conll03-english",
+        model_name_or_path=MODEL_NAME,
         max_seq_len=6,
         pre_split_text=True,
         ignore_labels=[],
@@ -219,7 +227,7 @@ def test_extract_method_unknown_token():
 @pytest.mark.integration
 def test_extract_method_simple_aggregation():
     ner = EntityExtractor(
-        model_name_or_path="elastic/distilbert-base-cased-finetuned-conll03-english",
+        model_name_or_path=MODEL_NAME,
         max_seq_len=6,
         aggregation_strategy="simple",
     )

@@ -25,9 +25,9 @@ import numpy as np
 
 from tokenizers.pre_tokenizers import WhitespaceSplit
 from tqdm import tqdm
-from haystack.schema import Document
-from haystack.nodes.base import BaseComponent
+from haystack.preview import Document
 from haystack.lazy_imports import LazyImport
+from haystack.preview import component
 
 
 logger = logging.getLogger(__name__)
@@ -73,11 +73,13 @@ with LazyImport(message="Run 'pip install farm-haystack[inference]'") as torch_a
             return self._len
 
 
-class EntityExtractor(BaseComponent):
+
+@component
+class EntityExtractor:
     """
     This node is used to extract entities out of documents.
     The most common use case for this would be as a named entity extractor.
-    The default model used is elastic/distilbert-base-cased-finetuned-conll03-english.
+    The default model used is "dslim/bert-base-NER".
     This node can be placed in a querying pipeline to perform entity extraction on retrieved documents only,
     or it can be placed in an indexing pipeline so that all documents in the document store have extracted entities.
     This Node will automatically split up long Documents based on the max token length of the underlying model and
@@ -135,7 +137,7 @@ class EntityExtractor(BaseComponent):
 
     def __init__(
         self,
-        model_name_or_path: str = "elastic/distilbert-base-cased-finetuned-conll03-english",
+        model_name_or_path: str = "dslim/bert-base-NER",
         model_version: Optional[str] = None,
         use_gpu: bool = True,
         batch_size: int = 16,
@@ -151,8 +153,6 @@ class EntityExtractor(BaseComponent):
         ignore_labels: Optional[List[str]] = None,
     ):
         torch_and_transformers_import.check()
-
-        super().__init__()
 
         self.devices, _ = initialize_device_settings(devices=devices, use_cuda=use_gpu, multi_gpu=False)
         if len(self.devices) > 1:
@@ -228,11 +228,13 @@ class EntityExtractor(BaseComponent):
                 doc["meta"].update(entity_lists)  # type: ignore
         else:
             if is_doc:
-                doc.meta["entities"] = entities  # type: ignore
+                doc.metadata["entities"] = entities  # type: ignore
             else:
                 doc["meta"]["entities"] = entities  # type: ignore
 
-    def run(self, documents: Optional[Union[List[Document], List[dict]]] = None) -> Tuple[Dict, str]:  # type: ignore
+
+    @component.output_types(documents=List[Document])
+    def run(self, documents: Optional[Union[List[Document], List[dict]]] = None) -> List[Document]:  # type: ignore
         """
         This is the method called when this node is used in a pipeline
         """
@@ -241,42 +243,17 @@ class EntityExtractor(BaseComponent):
             for doc in tqdm(documents, disable=not self.progress_bar, desc="Extracting entities"):
                 # In a querying pipeline, doc is a haystack.schema.Document object
                 if is_doc:
-                    content = doc.content  # type: ignore
+                    content = doc.text  # type: ignore
                 # In an indexing pipeline, doc is a dictionary
                 else:
                     content = doc["content"]  # type: ignore
                 entities = self.extract(content)
+
                 self._add_entities_to_doc(
                     doc, entities=entities, flatten_entities_in_meta_data=self.flatten_entities_in_meta_data
                 )
         output = {"documents": documents}
-        return output, "output_1"
-
-    def run_batch(self, documents: Union[List[Document], List[List[Document]], List[dict], List[List[dict]]], batch_size: Optional[int] = None):  # type: ignore
-        if isinstance(documents[0], (Document, dict)):
-            flattened_documents = documents
-        else:
-            flattened_documents = list(itertools.chain.from_iterable(documents))  # type: ignore
-
-        is_doc = isinstance(flattened_documents[0], Document)
-
-        if batch_size is None:
-            batch_size = self.batch_size
-
-        if is_doc:
-            docs = [doc.content for doc in flattened_documents]  # type: ignore
-        else:
-            docs = [doc["content"] for doc in flattened_documents]  # type: ignore
-
-        all_entities = self.extract_batch(docs, batch_size=batch_size)
-
-        for entities_per_doc, doc in zip(all_entities, flattened_documents):
-            self._add_entities_to_doc(
-                doc, entities=entities_per_doc, flatten_entities_in_meta_data=self.flatten_entities_in_meta_data  # type: ignore
-            )
-
-        output = {"documents": documents}
-        return output, "output_1"
+        return output
 
     def preprocess(self, sentence: List[str]):
         """Preprocessing step to tokenize the provided text.
@@ -439,7 +416,7 @@ class EntityExtractor(BaseComponent):
         )
         return flattened_predictions
 
-    def extract(self, text: Union[str, List[str]], batch_size: int = 1):
+    def extract(self, text: Union[str, List[str]], batch_size: int = 1) -> List:
         """
         This function can be called to perform entity extraction when using the node in isolation.
 
@@ -474,8 +451,6 @@ class EntityExtractor(BaseComponent):
             predictions.append(model_outputs)
         predictions = self._flatten_predictions(predictions)  # type: ignore
         predictions = self._group_predictions_by_doc(predictions, sentence, word_ids, word_offset_mapping)  # type: ignore
-
-        # Postprocess
         predictions = self.postprocess(predictions)  # type: ignore
 
         if is_single_text:
